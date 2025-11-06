@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Layout,
   Card,
@@ -58,6 +59,8 @@ import {
   SortAscendingOutlined,
   UnorderedListOutlined,
   AppstoreOutlined,
+  LogoutOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
@@ -93,6 +96,7 @@ interface Activity {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [todos, setTodos] = useState<Todo[]>([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
@@ -109,8 +113,36 @@ export default function Home() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [activeTab, setActiveTab] = useState('1');
+  const [userEmail, setUserEmail] = useState<string>('');
 
   const categories = ['Work', 'Personal', 'Shopping', 'Health', 'Study', 'Other'];
+
+  // Check authentication
+  useEffect(() => {
+    const isLoggedIn = localStorage.getItem('isLoggedIn');
+    const email = localStorage.getItem('userEmail');
+    
+    if (!isLoggedIn) {
+      router.push('/login');
+    } else {
+      setUserEmail(email || '');
+    }
+  }, [router]);
+
+  const handleLogout = () => {
+    Modal.confirm({
+      title: 'Are you sure you want to logout?',
+      icon: <ExclamationCircleOutlined />,
+      onOk() {
+        localStorage.removeItem('isLoggedIn');
+        localStorage.removeItem('userEmail');
+        messageApi.success('Logged out successfully!');
+        setTimeout(() => {
+          router.push('/login');
+        }, 1000);
+      },
+    });
+  };
 
   // Feature 1: Local Storage Persistence
   useEffect(() => {
@@ -482,6 +514,34 @@ export default function Home() {
                   unCheckedChildren="☀️"
                 />
               </Tooltip>
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'profile',
+                      icon: <UserOutlined />,
+                      label: userEmail,
+                      disabled: true,
+                    },
+                    {
+                      type: 'divider',
+                    },
+                    {
+                      key: 'logout',
+                      icon: <LogoutOutlined />,
+                      label: 'Logout',
+                      danger: true,
+                      onClick: handleLogout,
+                    },
+                  ],
+                }}
+                trigger={['click']}
+              >
+                <Avatar
+                  style={{ backgroundColor: '#52c41a', cursor: 'pointer' }}
+                  icon={<UserOutlined />}
+                />
+              </Dropdown>
               <Button
                 type="primary"
                 size="large"
