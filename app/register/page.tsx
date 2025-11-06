@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 import {
   Layout,
   Card,
@@ -11,7 +13,7 @@ import {
   Typography,
   Space,
   Divider,
-  message,
+  App,
   Row,
   Col,
   Avatar,
@@ -35,13 +37,13 @@ import {
   UploadOutlined,
   HomeOutlined,
 } from '@ant-design/icons';
-import { useRouter } from 'next/navigation';
 
 const { Title, Text, Link } = Typography;
 const { Content } = Layout;
 const { Option } = Select;
 
-export default function RegisterPage() {
+function RegisterPageContent() {
+  const { message } = App.useApp();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
@@ -74,27 +76,65 @@ export default function RegisterPage() {
     setLoading(true);
     console.log('Register values:', values);
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      // Register with Supabase
+      const { data, error } = await supabase.auth.signUp({
+        email: values.email,
+        password: values.password,
+        options: {
+          data: {
+            username: values.username,
+            first_name: values.firstName,
+            last_name: values.lastName,
+            phone: values.phone,
+            country: values.country,
+          },
+        },
+      });
+
+      if (error) {
+        message.error(`注册失败: ${error.message}`);
+        setLoading(false);
+        return;
+      }
+
+      if (data.user) {
+        message.success('注册成功！请查看邮箱确认链接。');
+        
+        // Redirect to login page
+        setTimeout(() => {
+          router.push('/login');
+        }, 2000);
+      }
+    } catch (error: any) {
+      message.error(`注册失败: ${error.message}`);
+    } finally {
       setLoading(false);
-      message.success('Registration successful! Redirecting to login...');
-      
-      // Redirect to login page
-      setTimeout(() => {
-        router.push('/login');
-      }, 1500);
-    }, 2000);
+    }
   };
 
-  const handleSocialRegister = (provider: string) => {
-    message.info(`${provider} registration coming soon!`);
+  const handleSocialRegister = async (provider: 'google' | 'github') => {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: provider,
+        options: {
+          redirectTo: `${window.location.origin}/`,
+        },
+      });
+
+      if (error) {
+        message.error(`${provider} 注册失败: ${error.message}`);
+      }
+    } catch (error: any) {
+      message.error(`注册失败: ${error.message}`);
+    }
   };
 
   const nextStep = () => {
     form.validateFields().then(() => {
       setCurrentStep(currentStep + 1);
     }).catch((error) => {
-      message.error('Please fill in all required fields!');
+      message.error('请填写所有必填字段！');
     });
   };
 
@@ -403,7 +443,7 @@ export default function RegisterPage() {
                       icon={<GoogleOutlined />}
                       block
                       size="large"
-                      onClick={() => handleSocialRegister('Google')}
+                      onClick={() => handleSocialRegister('google')}
                     >
                       Google
                     </Button>
@@ -413,7 +453,7 @@ export default function RegisterPage() {
                       icon={<GithubOutlined />}
                       block
                       size="large"
-                      onClick={() => handleSocialRegister('GitHub')}
+                      onClick={() => handleSocialRegister('github')}
                     >
                       GitHub
                     </Button>
@@ -435,5 +475,13 @@ export default function RegisterPage() {
         </Card>
       </Content>
     </Layout>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <App>
+      <RegisterPageContent />
+    </App>
   );
 }

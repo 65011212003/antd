@@ -1,12 +1,12 @@
 'use client';
 
 import {
-  AlipayOutlined,
   LockOutlined,
   MobileOutlined,
-  TaobaoOutlined,
   UserOutlined,
-  WeiboOutlined,
+  GoogleOutlined,
+  GithubOutlined,
+  UserAddOutlined,
 } from '@ant-design/icons';
 import {
   LoginFormPage,
@@ -15,9 +15,11 @@ import {
   ProFormCheckbox,
   ProFormText,
 } from '@ant-design/pro-components';
-import { Button, Divider, Space, Tabs, message, theme } from 'antd';
+import { Button, Divider, Space, Tabs, App, theme } from 'antd';
 import type { CSSProperties } from 'react';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 type LoginType = 'phone' | 'account';
 
@@ -29,8 +31,62 @@ const iconStyles: CSSProperties = {
 };
 
 const Page = () => {
-  const [loginType, setLoginType] = useState<LoginType>('phone');
+  const { message } = App.useApp();
+  const [loginType, setLoginType] = useState<LoginType>('account');
+  const [loading, setLoading] = useState(false);
   const { token } = theme.useToken();
+  const router = useRouter();
+
+  const handleSubmit = async (values: any) => {
+    setLoading(true);
+    
+    try {
+      if (loginType === 'account') {
+        // Email/Password login
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: values.username,
+          password: values.password,
+        });
+
+        if (error) {
+          message.error(`登录失败: ${error.message}`);
+          return;
+        }
+
+        if (data.user) {
+          message.success('登录成功！');
+          localStorage.setItem('isLoggedIn', 'true');
+          localStorage.setItem('userEmail', data.user.email || '');
+          router.push('/');
+        }
+      } else {
+        // Phone login
+        message.info('手机号登录功能即将推出！');
+      }
+    } catch (error: any) {
+      message.error(`登录失败: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSocialLogin = async (provider: 'google' | 'github') => {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: provider,
+        options: {
+          redirectTo: `${window.location.origin}/`,
+        },
+      });
+
+      if (error) {
+        message.error(`${provider} 登录失败: ${error.message}`);
+      }
+    } catch (error: any) {
+      message.error(`登录失败: ${error.message}`);
+    }
+  };
+
   return (
     <div
       style={{
@@ -42,12 +98,25 @@ const Page = () => {
         backgroundImageUrl="https://mdn.alipayobjects.com/huamei_gcee1x/afts/img/A*y0ZTS6WLwvgAAAAAAAAAAAAADml6AQ/fmt.webp"
         logo="https://github.githubassets.com/favicons/favicon.png"
         backgroundVideoUrl="https://gw.alipayobjects.com/v/huamei_gcee1x/afts/video/jXRBRK_VAwoAAAAAAAAAAAAAK4eUAQBr"
-        title="Github"
+        title="Todo App"
         containerStyle={{
           backgroundColor: 'rgba(0, 0, 0,0.65)',
           backdropFilter: 'blur(4px)',
         }}
-        subTitle="全球最大的代码托管平台"
+        subTitle="使用 Supabase 进行身份验证"
+        onFinish={handleSubmit}
+        submitter={{
+          searchConfig: {
+            submitText: loading ? '登录中...' : '登录',
+          },
+          submitButtonProps: {
+            loading: loading,
+            size: 'large',
+            style: {
+              width: '100%',
+            },
+          },
+        }}
         activityConfig={{
           style: {
             boxShadow: '0px 0px 8px rgba(0, 0, 0, 0.2)',
@@ -79,6 +148,7 @@ const Page = () => {
               justifyContent: 'center',
               alignItems: 'center',
               flexDirection: 'column',
+              gap: '16px',
             }}
           >
             <Divider plain>
@@ -92,50 +162,60 @@ const Page = () => {
                 其他登录方式
               </span>
             </Divider>
-            <Space align="center" size={24}>
-              <div
+            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              <Button
+                size="large"
+                block
+                icon={<GoogleOutlined />}
+                onClick={() => handleSocialLogin('google')}
                 style={{
                   display: 'flex',
-                  justifyContent: 'center',
                   alignItems: 'center',
-                  flexDirection: 'column',
-                  height: 40,
-                  width: 40,
-                  border: '1px solid ' + token.colorPrimaryBorder,
-                  borderRadius: '50%',
+                  justifyContent: 'center',
+                  height: '48px',
+                  fontSize: '16px',
                 }}
               >
-                <AlipayOutlined style={{ ...iconStyles, color: '#1677FF' }} />
-              </div>
-              <div
+                使用 Google 登录
+              </Button>
+              <Button
+                size="large"
+                block
+                icon={<GithubOutlined />}
+                onClick={() => handleSocialLogin('github')}
                 style={{
                   display: 'flex',
-                  justifyContent: 'center',
                   alignItems: 'center',
-                  flexDirection: 'column',
-                  height: 40,
-                  width: 40,
-                  border: '1px solid ' + token.colorPrimaryBorder,
-                  borderRadius: '50%',
+                  justifyContent: 'center',
+                  height: '48px',
+                  fontSize: '16px',
+                  background: '#24292e',
+                  borderColor: '#24292e',
+                  color: 'white',
                 }}
               >
-                <TaobaoOutlined style={{ ...iconStyles, color: '#FF6A10' }} />
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  flexDirection: 'column',
-                  height: 40,
-                  width: 40,
-                  border: '1px solid ' + token.colorPrimaryBorder,
-                  borderRadius: '50%',
-                }}
-              >
-                <WeiboOutlined style={{ ...iconStyles, color: '#1890ff' }} />
-              </div>
+                使用 GitHub 登录
+              </Button>
             </Space>
+            <Divider plain />
+            <Button
+              size="large"
+              block
+              type="dashed"
+              icon={<UserAddOutlined />}
+              onClick={() => router.push('/register')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '48px',
+                fontSize: '16px',
+                color: token.colorPrimary,
+                borderColor: token.colorPrimary,
+              }}
+            >
+              没有账号？立即注册
+            </Button>
           </div>
         }
       >
@@ -169,11 +249,15 @@ const Page = () => {
                   />
                 ),
               }}
-              placeholder={'用户名: admin or user'}
+              placeholder={'邮箱地址'}
               rules={[
                 {
                   required: true,
-                  message: '请输入用户名!',
+                  message: '请输入邮箱!',
+                },
+                {
+                  type: 'email',
+                  message: '请输入有效的邮箱地址!',
                 },
               ]}
             />
@@ -285,8 +369,10 @@ const Page = () => {
 
 export default () => {
   return (
-    <ProConfigProvider dark>
-      <Page />
-    </ProConfigProvider>
+    <App>
+      <ProConfigProvider dark>
+        <Page />
+      </ProConfigProvider>
+    </App>
   );
 };
