@@ -93,14 +93,63 @@ function RegisterPageContent() {
       });
 
       if (error) {
-        message.error(`注册失败: ${error.message}`);
+        // Provide helpful error messages
+        let errorMessage = error.message;
+
+        if (error.message.includes('Anonymous sign-ins are disabled')) {
+          errorMessage = 'Email registration is not enabled. Please enable Email authentication in Supabase Dashboard: Authentication > Providers > Email';
+        } else if (error.message.includes('User already registered')) {
+          errorMessage = 'This email is already registered. Please login instead.';
+        } else if (error.message.includes('Password should be at least')) {
+          errorMessage = 'Password must be at least 6 characters long.';
+        }
+
+        message.error({
+          content: errorMessage,
+          duration: 5,
+        });
         setLoading(false);
         return;
       }
 
       if (data.user) {
-        message.success('注册成功！请查看邮箱确认链接。');
-        
+        // Directly update the profile with form data
+        try {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              username: values.username,
+              first_name: values.firstName,
+              last_name: values.lastName,
+              phone: values.phone,
+              country: values.country,
+              updated_at: new Date().toISOString(),
+            }, {
+              onConflict: 'id'
+            });
+
+          if (profileError) {
+            console.error('Profile update error:', profileError);
+            message.warning('User created but profile data not saved. You can update it later in settings.');
+          }
+        } catch (profileErr) {
+          console.error('Profile error:', profileErr);
+        }
+
+        // Check if email confirmation is required
+        if (data.user.identities && data.user.identities.length === 0) {
+          message.warning({
+            content: 'Registration successful! Please check your email and click the confirmation link before logging in.',
+            duration: 6,
+          });
+        } else {
+          message.success({
+            content: 'Registration successful! Redirecting to login...',
+            duration: 3,
+          });
+        }
+
         // Redirect to login page
         setTimeout(() => {
           router.push('/login');

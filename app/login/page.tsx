@@ -49,7 +49,21 @@ const Page = () => {
         });
 
         if (error) {
-          message.error(`登录失败: ${error.message}`);
+          // Provide helpful error messages
+          let errorMessage = error.message;
+          
+          if (error.message.includes('Invalid login credentials')) {
+            errorMessage = 'Invalid email or password. Please try again.';
+          } else if (error.message.includes('Email not confirmed')) {
+            errorMessage = 'Please confirm your email before logging in. Check your inbox for the confirmation link.';
+          } else if (error.message.includes('Anonymous sign-ins are disabled')) {
+            errorMessage = 'Email login is not enabled. Please enable Email authentication in Supabase Dashboard.';
+          }
+          
+          message.error({
+            content: errorMessage,
+            duration: 5,
+          });
           return;
         }
 

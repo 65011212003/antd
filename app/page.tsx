@@ -2,6 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import {
+  fetchTodos,
+  createTodo,
+  updateTodo,
+  deleteTodo as deleteTodoDb,
+  fetchActivities,
+  createActivity,
+  initializeDatabase,
+  type Todo as TodoType,
+  type Activity as ActivityType,
+} from '@/lib/supabase-db';
 import {
   Layout,
   Card,
@@ -24,7 +36,6 @@ import {
   Divider,
   Empty,
   Tooltip,
-  message,
   Avatar,
   Typography,
   Switch,
@@ -35,7 +46,8 @@ import {
   Radio,
   Slider,
   Alert,
-  notification,
+  App,
+  Spin,
 } from 'antd';
 import {
   PlusOutlined,
@@ -95,7 +107,8 @@ interface Activity {
   type: 'add' | 'edit' | 'complete' | 'delete';
 }
 
-export default function Home() {
+function HomePage() {
+  const { message, notification: notificationApi } = App.useApp();
   const router = useRouter();
   const [todos, setTodos] = useState<Todo[]>([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -105,8 +118,6 @@ export default function Home() {
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
   const [form] = Form.useForm();
-  const [messageApi, contextHolder] = message.useMessage();
-  const [notificationApi, notificationContextHolder] = notification.useNotification();
   const [darkMode, setDarkMode] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [sortBy, setSortBy] = useState<'date' | 'priority' | 'title'>('date');
@@ -114,85 +125,105 @@ export default function Home() {
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [activeTab, setActiveTab] = useState('1');
   const [userEmail, setUserEmail] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [dbInitialized, setDbInitialized] = useState(false);
 
   const categories = ['Work', 'Personal', 'Shopping', 'Health', 'Study', 'Other'];
 
-  // Check authentication
+  // Check authentication and initialize database
   useEffect(() => {
-    const isLoggedIn = localStorage.getItem('isLoggedIn');
-    const email = localStorage.getItem('userEmail');
-    
-    if (!isLoggedIn) {
-      router.push('/login');
-    } else {
-      setUserEmail(email || '');
-    }
+    const checkAuth = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+      
+      setUserEmail(user.email || '');
+      
+      // Initialize database
+      const initialized = await initializeDatabase();
+      setDbInitialized(initialized);
+      
+      if (!initialized) {
+        message.warning('Database not initialized. Please run the SQL setup script.');
+      }
+      
+      // Load data
+      await loadTodos();
+      await loadActivities();
+      setLoading(false);
+    };
+
+    checkAuth();
   }, [router]);
 
-  const handleLogout = () => {
-    Modal.confirm({
-      title: 'Are you sure you want to logout?',
-      icon: <ExclamationCircleOutlined />,
-      onOk() {
-        localStorage.removeItem('isLoggedIn');
-        localStorage.removeItem('userEmail');
-        messageApi.success('Logged out successfully!');
-        setTimeout(() => {
-          router.push('/login');
-        }, 1000);
-      },
-    });
+  // Load todos from Supabase
+  const loadTodos = async () => {
+    try {
+      const data = await fetchTodos();
+      const formattedTodos: Todo[] = data.map((todo: TodoType) => ({
+        id: todo.id,
+        title: todo.title,
+        description: todo.description,
+        completed: todo.completed,
+        priority: todo.priority,
+        category: todo.category,
+        dueDate: todo.due_date ? dayjs(todo.due_date) : undefined,
+        favorite: todo.favorite,
+        createdAt: dayjs(todo.created_at),
+        completedAt: todo.completed_at ? dayjs(todo.completed_at) : undefined,
+        subtasks: todo.subtasks || [],
+        tags: todo.tags || [],
+      }));
+      setTodos(formattedTodos);
+    } catch (error: any) {
+      console.error('Error loading todos:', error);
+      message.error('Failed to load todos');
+    }
   };
 
-  // Feature 1: Local Storage Persistence
-  useEffect(() => {
-    const savedTodos = localStorage.getItem('todos');
-    const savedActivities = localStorage.getItem('activities');
-    const savedDarkMode = localStorage.getItem('darkMode');
-    
-    if (savedTodos) {
-      const parsedTodos = JSON.parse(savedTodos);
-      setTodos(parsedTodos.map((todo: any) => ({
-        ...todo,
-        createdAt: dayjs(todo.createdAt),
-        dueDate: todo.dueDate ? dayjs(todo.dueDate) : undefined,
-        completedAt: todo.completedAt ? dayjs(todo.completedAt) : undefined,
-      })));
+  // Load activities from Supabase
+  const loadActivities = async () => {
+    try {
+      const data = await fetchActivities();
+      const formattedActivities: Activity[] = data.map((activity: ActivityType) => ({
+        id: activity.id,
+        action: activity.action,
+        todoTitle: activity.todo_title,
+        timestamp: dayjs(activity.created_at),
+        type: activity.type,
+      }));
+      setActivities(formattedActivities);
+    } catch (error: any) {
+      console.error('Error loading activities:', error);
     }
-    if (savedActivities) {
-      const parsedActivities = JSON.parse(savedActivities);
-      setActivities(parsedActivities.map((activity: any) => ({
-        ...activity,
-        timestamp: dayjs(activity.timestamp),
-      })));
+  };
+
+  // Add activity
+  const addActivity = async (action: string, todoTitle: string, type: Activity['type']) => {
+    try {
+      await createActivity({
+        action,
+        todo_title: todoTitle,
+        type,
+      });
+      await loadActivities();
+    } catch (error: any) {
+      console.error('Error creating activity:', error);
     }
-    if (savedDarkMode) {
-      setDarkMode(savedDarkMode === 'true');
+  };
+
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      message.success('Logged out successfully!');
+      router.push('/login');
+    } catch (error: any) {
+      message.error('Failed to logout: ' + error.message);
     }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('todos', JSON.stringify(todos));
-  }, [todos]);
-
-  useEffect(() => {
-    localStorage.setItem('activities', JSON.stringify(activities));
-  }, [activities]);
-
-  useEffect(() => {
-    localStorage.setItem('darkMode', darkMode.toString());
-  }, [darkMode]);
-
-  // Feature 2: Activity Log
-  const addActivity = (action: string, todoTitle: string, type: Activity['type']) => {
-    const newActivity: Activity = {
-      id: Date.now(),
-      action,
-      todoTitle,
-      timestamp: dayjs(),
-      type,
-    };
-    setActivities([newActivity, ...activities.slice(0, 49)]); // Keep last 50 activities
   };
 
   // Feature 3: Due Date Notifications
@@ -247,39 +278,54 @@ export default function Home() {
     setIsModalVisible(true);
   };
 
-  const handleOk = () => {
-    form.validateFields().then((values) => {
+  const handleOk = async () => {
+    try {
+      const values = await form.validateFields();
+      
       if (editingTodo) {
-        setTodos(
-          todos.map((todo) =>
-            todo.id === editingTodo.id
-              ? { ...todo, ...values }
-              : todo
-          )
-        );
-        addActivity('Updated task', values.title, 'edit');
-        messageApi.success('Todo updated successfully!');
-      } else {
-        const newTodo: Todo = {
-          id: Date.now(),
+        // Update existing todo
+        const updated = await updateTodo(editingTodo.id, {
           title: values.title,
           description: values.description,
-          completed: false,
           priority: values.priority,
           category: values.category,
-          dueDate: values.dueDate,
-          favorite: false,
-          createdAt: dayjs(),
+          due_date: values.dueDate,
           tags: values.tags || [],
           subtasks: values.subtasks || [],
-        };
-        setTodos([newTodo, ...todos]);
-        addActivity('Created new task', values.title, 'add');
-        messageApi.success('Todo added successfully!');
+        });
+        
+        if (updated) {
+          await addActivity('Updated task', values.title, 'edit');
+          message.success('Todo updated successfully!');
+          await loadTodos();
+        }
+      } else {
+        // Create new todo
+        const created = await createTodo({
+          title: values.title,
+          description: values.description,
+          priority: values.priority,
+          category: values.category,
+          due_date: values.dueDate,
+          tags: values.tags || [],
+          subtasks: values.subtasks || [],
+          completed: false,
+          favorite: false,
+        });
+        
+        if (created) {
+          await addActivity('Created new task', values.title, 'add');
+          message.success('Todo added successfully!');
+          await loadTodos();
+        }
       }
+      
       setIsModalVisible(false);
       form.resetFields();
-    });
+      setEditingTodo(null);
+    } catch (error: any) {
+      message.error('Failed to save todo: ' + error.message);
+    }
   };
 
   const handleCancel = () => {
@@ -288,35 +334,47 @@ export default function Home() {
     form.resetFields();
   };
 
-  const toggleComplete = (id: number) => {
-    setTodos(
-      todos.map((todo) => {
-        if (todo.id === id) {
-          const newCompleted = !todo.completed;
-          if (newCompleted) {
-            addActivity('Completed task', todo.title, 'complete');
-            messageApi.success(`🎉 Completed: ${todo.title}`);
-          }
-          return { 
-            ...todo, 
-            completed: newCompleted,
-            completedAt: newCompleted ? dayjs() : undefined,
-          };
+  const toggleComplete = async (id: number) => {
+    try {
+      const todo = todos.find((t) => t.id === id);
+      if (!todo) return;
+
+      const newCompleted = !todo.completed;
+      const updated = await updateTodo(id, {
+        completed: newCompleted,
+        completed_at: newCompleted ? new Date().toISOString() : undefined,
+      });
+
+      if (updated) {
+        if (newCompleted) {
+          await addActivity('Completed task', todo.title, 'complete');
+          message.success(`🎉 Completed: ${todo.title}`);
         }
-        return todo;
-      })
-    );
+        await loadTodos();
+      }
+    } catch (error: any) {
+      message.error('Failed to toggle completion: ' + error.message);
+    }
   };
 
-  const toggleFavorite = (id: number) => {
-    setTodos(
-      todos.map((todo) =>
-        todo.id === id ? { ...todo, favorite: !todo.favorite } : todo
-      )
-    );
+  const toggleFavorite = async (id: number) => {
+    try {
+      const todo = todos.find((t) => t.id === id);
+      if (!todo) return;
+
+      const updated = await updateTodo(id, {
+        favorite: !todo.favorite,
+      });
+
+      if (updated) {
+        await loadTodos();
+      }
+    } catch (error: any) {
+      message.error('Failed to toggle favorite: ' + error.message);
+    }
   };
 
-  const deleteTodo = (id: number) => {
+  const deleteTodo = async (id: number) => {
     const todo = todos.find((t) => t.id === id);
     Modal.confirm({
       title: 'Are you sure you want to delete this todo?',
@@ -324,44 +382,66 @@ export default function Home() {
       okText: 'Yes',
       okType: 'danger',
       cancelText: 'No',
-      onOk() {
-        setTodos(todos.filter((t) => t.id !== id));
-        if (todo) {
-          addActivity('Deleted task', todo.title, 'delete');
+      async onOk() {
+        try {
+          await deleteTodoDb(id);
+          if (todo) {
+            await addActivity('Deleted task', todo.title, 'delete');
+            message.success('Todo deleted successfully!');
+            await loadTodos();
+          }
+        } catch (error: any) {
+          message.error('Failed to delete todo: ' + error.message);
         }
-        messageApi.success('Todo deleted successfully!');
       },
     });
   };
 
   // Feature 4: Bulk Actions
   const deleteAllCompleted = () => {
-    const completedCount = todos.filter((todo) => todo.completed).length;
+    const completedTodos = todos.filter((todo) => todo.completed);
+    const completedCount = completedTodos.length;
+    
     Modal.confirm({
       title: `Delete ${completedCount} completed task(s)?`,
       icon: <ExclamationCircleOutlined />,
       okText: 'Yes',
       okType: 'danger',
       cancelText: 'No',
-      onOk() {
-        setTodos(todos.filter((todo) => !todo.completed));
-        addActivity(`Deleted ${completedCount} completed tasks`, 'Bulk action', 'delete');
-        messageApi.success(`Deleted ${completedCount} completed task(s)!`);
+      async onOk() {
+        try {
+          // Delete all completed todos
+          await Promise.all(completedTodos.map(todo => deleteTodoDb(todo.id)));
+          await addActivity(`Deleted ${completedCount} completed tasks`, 'Bulk action', 'delete');
+          message.success(`Deleted ${completedCount} completed task(s)!`);
+          await loadTodos();
+        } catch (error: any) {
+          message.error('Failed to delete completed todos: ' + error.message);
+        }
       },
     });
   };
 
-  const markAllComplete = () => {
-    const activeCount = todos.filter((todo) => !todo.completed).length;
-    setTodos(
-      todos.map((todo) => ({
-        ...todo,
-        completed: true,
-        completedAt: todo.completed ? todo.completedAt : dayjs(),
-      }))
-    );
-    addActivity(`Marked ${activeCount} tasks as complete`, 'Bulk action', 'complete');
-    messageApi.success(`Marked ${activeCount} task(s) as complete!`);
+  const markAllComplete = async () => {
+    const activeTodos = todos.filter((todo) => !todo.completed);
+    const activeCount = activeTodos.length;
+    
+    try {
+      // Mark all active todos as complete
+      await Promise.all(
+        activeTodos.map(todo =>
+          updateTodo(todo.id, {
+            completed: true,
+            completed_at: new Date().toISOString(),
+          })
+        )
+      );
+      await addActivity(`Marked ${activeCount} tasks as complete`, 'Bulk action', 'complete');
+      message.success(`Marked ${activeCount} task(s) as complete!`);
+      await loadTodos();
+    } catch (error: any) {
+      message.error('Failed to mark all complete: ' + error.message);
+    }
   };
 
   // Feature 5: Export/Import Functionality
@@ -374,28 +454,37 @@ export default function Home() {
     link.download = `todos-backup-${dayjs().format('YYYY-MM-DD')}.json`;
     link.click();
     URL.revokeObjectURL(url);
-    messageApi.success('Todos exported successfully!');
+    message.success('Todos exported successfully!');
   };
 
-  const importTodos = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const importTodos = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
           const importedTodos = JSON.parse(e.target?.result as string);
-          const parsedTodos = importedTodos.map((todo: any) => ({
-            ...todo,
-            id: Date.now() + Math.random(), // Generate new IDs to avoid conflicts
-            createdAt: dayjs(todo.createdAt),
-            dueDate: todo.dueDate ? dayjs(todo.dueDate) : undefined,
-            completedAt: todo.completedAt ? dayjs(todo.completedAt) : undefined,
-          }));
-          setTodos([...parsedTodos, ...todos]);
-          addActivity(`Imported ${parsedTodos.length} tasks`, 'Import', 'add');
-          messageApi.success(`Imported ${parsedTodos.length} todo(s) successfully!`);
+          
+          // Create todos in database
+          for (const todo of importedTodos) {
+            await createTodo({
+              title: todo.title,
+              description: todo.description,
+              priority: todo.priority,
+              category: todo.category,
+              due_date: todo.due_date || todo.dueDate,
+              tags: todo.tags || [],
+              subtasks: todo.subtasks || [],
+              completed: todo.completed || false,
+              favorite: todo.favorite || false,
+            });
+          }
+          
+          await addActivity(`Imported ${importedTodos.length} tasks`, 'Import', 'add');
+          message.success(`Imported ${importedTodos.length} todo(s) successfully!`);
+          await loadTodos();
         } catch (error) {
-          messageApi.error('Failed to import todos. Invalid file format.');
+          message.error('Failed to import todos. Invalid file format.');
         }
       };
       reader.readAsText(file);
@@ -497,8 +586,6 @@ export default function Home() {
 
   return (
     <>
-      {contextHolder}
-      {notificationContextHolder}
       <Layout style={{ minHeight: '100vh', background: darkMode ? '#141414' : '#f0f2f5' }}>
         <Header style={{ background: darkMode ? '#1f1f1f' : '#1890ff', padding: '0 24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -525,6 +612,12 @@ export default function Home() {
                     },
                     {
                       type: 'divider',
+                    },
+                    {
+                      key: 'settings',
+                      icon: <UserOutlined />,
+                      label: 'Profile Settings',
+                      onClick: () => router.push('/profile'),
                     },
                     {
                       key: 'logout',
@@ -1046,5 +1139,13 @@ export default function Home() {
         </Form>
       </Modal>
     </>
+  );
+}
+
+export default function Page() {
+  return (
+    <App>
+      <HomePage />
+    </App>
   );
 }
